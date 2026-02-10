@@ -24,5 +24,8 @@ Thumbs.db
 *.log
 npm-debug.log*
 
+# Memory (contains sensitive data)
+memory/
+
 # Coverage
 coverage/
