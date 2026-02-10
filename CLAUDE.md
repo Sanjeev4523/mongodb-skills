@@ -23,6 +23,21 @@ Single source of truth for all collection schemas. Stores:
 - Field aliases (e.g. `createdAt` is also referred to as "creation date")
 - Foreign key relationships between collections
 
+## Query Logging
+
+Whenever you generate MongoDB queries for the user, **always** append them to the day's query log at `memory/queries/YYYY-MM-DD.json` (using today's date).
+
+Each file is a JSON array of query entries. Append to the existing array if the file already exists, or create a new array if it doesn't.
+
+Entry format:
+```json
+{
+  "collection": "<collection_name>",
+  "description": "<what the query does in plain english>",
+  "pipeline": [ ... ]
+}
+```
+
 ## MCP
 
 The project connects to MongoDB via an MCP server configured in `.mcp.json` (gitignored — contains credentials).
