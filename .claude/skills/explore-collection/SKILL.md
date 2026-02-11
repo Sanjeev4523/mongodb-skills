@@ -17,7 +17,18 @@ Explore a MongoDB collection to learn its schema, field types, value distributio
 
 ## Instructions
 
-Follow steps 1–8 in order. Use the MCP tools `list_collections` and `run_aggregation` (with `database: "smv-stage"`) for all MongoDB operations. Do NOT skip steps or combine aggregations in ways that could lose detail.
+Follow steps 0–8 in order. Use the MCP tools `list_collections` and `run_aggregation` (with `database: "smv-stage"`) for all MongoDB operations. Do NOT skip steps or combine aggregations in ways that could lose detail.
+
+### Step 0: Check Existing Schema
+
+Before doing any MCP calls, check if `memory/schema/$ARGUMENTS.json` already exists using `Glob`.
+
+If it exists:
+1. Read the file
+2. Show the user a summary: document count, number of fields, when it was explored, and any notes
+3. Ask: "A schema already exists for this collection (explored on {date}). Do you want to re-explore from scratch, or update the existing schema?"
+4. If user says update/skip → stop here
+5. If user says re-explore → continue to Step 1
 
 ### Step 1: Validate Collection
 
@@ -181,8 +192,22 @@ Key formatting rules:
 - All enum values should include their counts
 - Foreign keys appear both on the field object and in the top-level `foreignKeys` array
 
-After writing the file, print a confirmation with:
+After writing the schema file, also update `memory/guide.json`:
+1. Read `memory/guide.json` (or create it if it doesn't exist with `{ "collections": {} }`)
+2. Add/update the entry under `collections.$ARGUMENTS` with:
+   - `database` — from the schema metadata
+   - `aliases` — from user notes (empty array if none)
+   - `description` — from user notes (empty string if none)
+   - `documentCount` — from the schema metadata
+   - `defaultFilters` — from any user-specified "always filter" notes (empty object if none)
+   - `deprecatedFields` — list of all fields marked `deprecated: true` in the schema
+   - `references` — from the `foreignKeys` array, as a `field → targetCollection` map
+   - `schemaFile` — `"memory/schema/$ARGUMENTS.json"`
+   - `exploredAt` — today's date (YYYY-MM-DD)
+3. Write the updated guide file back
+
+After writing both files, print a confirmation with:
 - Total fields discovered
 - Number of enum fields
 - Number of foreign keys detected
-- File path written
+- File paths written
