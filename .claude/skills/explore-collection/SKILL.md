@@ -1,17 +1,29 @@
 ---
 name: explore-collection
 description: Explore a MongoDB collection to learn its schema, field types, value distributions, and relationships
-allowed-tools: Read, Write, Edit, Glob, Grep, list_collections, run_aggregation
-argument-hint: <collection_name>
+allowed-tools: Read, Write, Edit, Glob, Grep, Task, list_collections, run_aggregation
+argument-hint: <collection_name> [collection_name2] ...
 ---
 
 # Explore Collection
 
-Explore a MongoDB collection to learn its schema, field types, value distributions, and relationships — then persist the results for future query generation.
+Explore one or more MongoDB collections to learn their schema, field types, value distributions, and relationships — then persist the results for future query generation.
 
-**Target collection:** $ARGUMENTS
+**Target collection(s):** $ARGUMENTS
 
 **Database:** Read from `memory/guide.json` → `database` field. If guide.json doesn't exist yet, ask the user which database to use.
+
+---
+
+## Multi-Collection Mode
+
+If `$ARGUMENTS` contains more than one collection name (space- or comma-separated), explore **all of them in parallel**:
+
+1. Read `memory/guide.json` and call `list_collections` once upfront to validate all names.
+2. For each valid collection, launch a **separate Task subagent** (subagent_type: `general-purpose`) with a prompt that contains the full single-collection exploration instructions (Steps 0–8 below), the database name, and the collection name. Run all Task calls in a **single message** so they execute in parallel.
+3. After all subagents complete, read back the written schema files and present a combined summary to the user.
+
+If only one collection is specified, follow Steps 0–8 directly (no subagent needed).
 
 ---
 
@@ -72,6 +84,20 @@ Use dot-notation for nested fields so the final field map is flat: `address.city
 
 For each discovered field, run targeted aggregations to understand its values. Use the **full collection** (not just the sample) for these aggregations. Add `{ "$limit": 10000 }` as the first pipeline stage on collections with `documentCount > 1000000`.
 
+#### Parallelization Strategy
+
+After building the field inventory in Step 4, group fields by type to reduce round trips — but avoid overwhelming the database with too many concurrent aggregations.
+
+1. **Batch by type** — combine all fields of the same type into a single `$group` where possible:
+   - One aggregation for **all number fields** (min/max/avg for each)
+   - One aggregation for **all date fields** (min/max for each)
+   - One aggregation for **all boolean fields** (distribution for each)
+   - One aggregation for **all array fields** (size stats for each)
+2. **Fire the batched aggregations in parallel** — these are lightweight (single `$group` each), so issue them together in one message.
+3. **String fields** — these need individual aggregations (distinct value counts) and are heavier on the DB. Run them in batches of **up to 5 parallel calls** per round. Wait for each batch to return before starting the next.
+
+#### Aggregation Templates by Type
+
 **Strings:**
 ```json
 [{ "$group": { "_id": "$fieldName", "count": { "$sum": 1 } } }, { "$sort": { "count": -1 } }]
@@ -79,19 +105,19 @@ For each discovered field, run targeted aggregations to understand its values. U
 - If fewer than 30 distinct values → mark `isEnum: true`, store all `enumValues` with counts
 - If 30+ distinct values → mark `isEnum: false`, store 5 example values
 
-**Numbers:**
+**Numbers** (batch all number fields into one `$group`):
 ```json
 [{ "$group": { "_id": null, "min": { "$min": "$fieldName" }, "max": { "$max": "$fieldName" }, "avg": { "$avg": "$fieldName" } } }]
 ```
 Store as `range: { min, max, avg }`.
 
-**Dates:**
+**Dates** (batch all date fields into one `$group`):
 ```json
 [{ "$group": { "_id": null, "min": { "$min": "$fieldName" }, "max": { "$max": "$fieldName" } } }]
 ```
 Store as `range: { min, max }`.
 
-**Booleans:**
+**Booleans** (batch all boolean fields into one `$group`):
 ```json
 [{ "$group": { "_id": "$fieldName", "count": { "$sum": 1 } } }]
 ```
@@ -103,13 +129,11 @@ Flag as `foreignKey` candidate. Infer the target collection from the field name 
 { "foreignKey": { "targetCollection": "organizations", "confirmed": true/false } }
 ```
 
-**Arrays:**
+**Arrays** (batch all array fields into one `$group`):
 ```json
 [{ "$group": { "_id": null, "minLen": { "$min": { "$size": "$fieldName" } }, "maxLen": { "$max": { "$size": "$fieldName" } }, "avgLen": { "$avg": { "$size": "$fieldName" } } } }]
 ```
 Store as `arrayDetails: { elementType, minLength, maxLength, avgLength }`. Determine element type from the sample data. If array elements are strings with <30 distinct values, unwind and count them as enum values too.
-
-**Important:** You may batch related fields into a single `$group` stage where it makes sense (e.g. all number fields in one aggregation, all boolean fields in one aggregation) to reduce the number of MCP calls. Just make sure every field gets analyzed.
 
 ### Step 6: Change Frequency
 
