@@ -11,13 +11,13 @@ Explore a MongoDB collection to learn its schema, field types, value distributio
 
 **Target collection:** $ARGUMENTS
 
-**Database:** `smv-stage`
+**Database:** Read from `memory/guide.json` → `database` field. If guide.json doesn't exist yet, ask the user which database to use.
 
 ---
 
 ## Instructions
 
-Follow steps 0–8 in order. Use the MCP tools `list_collections` and `run_aggregation` (with `database: "smv-stage"`) for all MongoDB operations. Do NOT skip steps or combine aggregations in ways that could lose detail.
+Follow steps 0–8 in order. Use the MCP tools `list_collections` and `run_aggregation` with the database from `memory/guide.json`. Do NOT skip steps or combine aggregations in ways that could lose detail.
 
 ### Step 0: Check Existing Schema
 
@@ -32,7 +32,7 @@ If it exists:
 
 ### Step 1: Validate Collection
 
-Call `list_collections` with `database: "smv-stage"`. If `$ARGUMENTS` is not in the list, show the available collections and ask the user to pick one. Do not proceed until a valid collection is confirmed.
+Call `list_collections` with the database from guide.json. If `$ARGUMENTS` is not in the list, show the available collections and ask the user to pick one. Do not proceed until a valid collection is confirmed.
 
 ### Step 2: Get Document Count
 
@@ -156,7 +156,7 @@ Use this exact structure:
 {
   "metadata": {
     "collection": "<collection_name>",
-    "database": "smv-stage",
+    "database": "<from guide.json>",
     "documentCount": <number>,
     "exploredAt": "<ISO 8601 timestamp>",
     "sampleSize": 100
@@ -195,7 +195,6 @@ Key formatting rules:
 After writing the schema file, also update `memory/guide.json`:
 1. Read `memory/guide.json` (or create it if it doesn't exist with `{ "collections": {} }`)
 2. Add/update the entry under `collections.$ARGUMENTS` with:
-   - `database` — from the schema metadata
    - `aliases` — from user notes (empty array if none)
    - `description` — from user notes (empty string if none)
    - `documentCount` — from the schema metadata
