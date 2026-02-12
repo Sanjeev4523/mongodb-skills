@@ -33,13 +33,16 @@ Single source of truth for all collection schemas. Stores:
 - Field aliases (e.g. `createdAt` is also referred to as "creation date")
 - Foreign key relationships between collections
 
-## Query Logging
+## Query Logging (MANDATORY)
 
-Whenever you generate MongoDB queries for the user, **always** append them to the day's query log at `memory/queries/YYYY-MM-DD.json` (using today's date).
+**Every MongoDB query you run MUST be logged immediately after execution.** Do not wait for the user to remind you — log queries as part of the same response where you run them.
 
-Each file is a JSON array of query entries. Append to the existing array if the file already exists, or create a new array if it doesn't.
+Log to `memory/queries/YYYY-MM-DD.json` (today's date). Append to the existing array if the file exists, or create a new array if it doesn't.
 
-Only log the final working query. User corrections and schema learnings go directly to `memory/schema/` files, not the query log.
+Rules:
+- Log every final working query in the same turn you execute it
+- Only log the final working query — not intermediate/failed attempts
+- User corrections and schema learnings go to `memory/schema/` files, not the query log
 
 Entry format:
 ```json
