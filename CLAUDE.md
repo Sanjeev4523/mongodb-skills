@@ -35,26 +35,16 @@ Single source of truth for all collection schemas. Stores:
 
 ## Query Logging (MANDATORY)
 
-**Every MongoDB query you run MUST be logged immediately after execution.** Do not wait for the user to remind you — log queries as part of the same response where you run them.
+**Every MongoDB query you run MUST be logged immediately after execution.** Use the `write-queries` skill for all query logging. Do not wait for the user to remind you — log queries as part of the same response where you run them.
 
 Log to `memory/queries/YYYY-MM-DD.json` (today's date). Append to the existing array if the file exists, or create a new array if it doesn't.
 
 Rules:
 - Log every final working query in the same turn you execute it
 - Only log the final working query — not intermediate/failed attempts
-- User corrections and schema learnings go to `memory/schema/` files, not the query log
+- Learnings (corrections, business rules, field discoveries) are captured in the query log's `learnings` field — the skill handles this automatically
 
-Entry format:
-```json
-{
-  "collection": "<collection_name>",
-  "relatedCollections": ["<other_collection>"],
-  "description": "<what the query does in plain english>",
-  "pipeline": [ ... ]
-}
-```
-
-- `relatedCollections` — include only when the pipeline has `$lookup` stages; lists all collections referenced. Omit for single-collection queries.
+The `write-queries` skill enriches each log entry with: `stages`, `techniques`, `fieldsUsed`, `defaultFiltersApplied`, `tags`, and `learnings`. See the skill definition for the full schema.
 
 ## MCP
 
