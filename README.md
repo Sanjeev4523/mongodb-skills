@@ -1,10 +1,10 @@
-# Mogo Skills
+# MongoDB Skills
 
 Claude Code skills that help you explore MongoDB collections, generate queries, and build institutional knowledge — all through natural language.
 
 ## What It Does
 
-Mogo Skills is a set of three [Claude Code skills](https://docs.anthropic.com/en/docs/claude-code/skills) that turn Claude into a MongoDB expert for your specific database. As you ask questions, the system learns your schema, business rules, and query patterns — making each subsequent query smarter than the last.
+MongoDB Skills is a set of three [Claude Code skills](https://docs.anthropic.com/en/docs/claude-code/skills) that turn Claude into a MongoDB expert for your specific database. As you ask questions, the system learns your schema, business rules, and query patterns — making each subsequent query smarter than the last.
 
 ## Skills
 
