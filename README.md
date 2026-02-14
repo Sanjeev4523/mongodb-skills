@@ -64,9 +64,9 @@ Create this file in the project root (it's gitignored and will never be committe
   "mcpServers": {
     "mongodb": {
       "command": "npx",
-      "args": ["-y", "mongodb-mcp-server"],
+      "args": ["mongodb-mcp"],
       "env": {
-        "MONGODB_URI": "mongodb+srv://<user>:<password>@<cluster>/<database>"
+        "MONGODB_URI": "mongodb+srv://user:pass@cluster.mongodb.net/dbname"
       }
     }
   }
