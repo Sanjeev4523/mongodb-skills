@@ -48,9 +48,14 @@ Processes unprocessed query logs and extracts learnings to enrich schema and gui
 3. **Log** every query automatically with stages, techniques, fields, and learnings
 4. **Learn** from query logs to enrich schemas and improve future query generation
 
+## Prerequisites
+
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview)
+- [jq](https://jqlang.github.io/jq/download/) — used by explore-collection for field discovery
+
 ## Setup
 
-1. [Install Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview)
+1. Install the prerequisites above
 2. Clone this repo
 3. Create `.mcp.json` in the project root with your MongoDB connection (see template below)
 4. Run `/explore-collection <collection_name>` to start building your knowledge base
