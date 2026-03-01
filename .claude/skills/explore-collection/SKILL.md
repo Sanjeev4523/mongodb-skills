@@ -83,10 +83,10 @@ Store the count as `documentCount` for later.
 
 ### Step 3: Sample Documents
 
-Sample 20 recent documents for field discovery. Use `run_aggregation_to_file` to write results directly to a local file — zero context cost regardless of document size.
+Sample 100 recent documents for field discovery. Use `run_aggregation_to_file` to write results directly to a local file — zero context cost regardless of document size.
 
 Call `run_aggregation_to_file` with:
-- **pipeline:** `[{ "$sort": { "_id": -1 } }, { "$limit": 20 }]`
+- **pipeline:** `[{ "$sort": { "_id": -1 } }, { "$limit": 100 }]`
 - **outputPath:** `/tmp/explore_{collection}.json`
 
 The tool writes a **JSON array** to the file and returns only metadata (doc count, file path, file size). No raw documents enter the conversation context.
@@ -123,7 +123,7 @@ jq '.[0]' /tmp/explore_{collection}.json
 
 From these results, build the field inventory:
 - **type(s)** observed (string, number, boolean, date, objectId, array, object, null)
-- **presence** — fraction of the 20 docs containing this field (e.g. 0.85 means 17 of 20)
+- **presence** — fraction of the 100 docs containing this field (e.g. 0.73 means 73 of 100)
 - Whether it's an **array** (and what element type)
 - Whether **mixed types** appear (more than one non-null type)
 - Flag fields with **<10% presence** as `sparse: true`
@@ -260,7 +260,7 @@ Use this exact structure:
     "database": "<from guide.json>",
     "documentCount": "<number>",
     "exploredAt": "<ISO 8601 timestamp>",
-    "sampleSize": 20
+    "sampleSize": 100
   },
   "fields": {
     "<fieldName>": {
