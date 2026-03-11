@@ -1,7 +1,7 @@
 ---
 name: explore-collection
 description: Explore a MongoDB collection to learn its schema, field types, value distributions, and relationships
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task, list_collections, run_aggregation, run_aggregation_to_file
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task, list_collections, list_indexes, run_aggregation, run_aggregation_to_file
 argument-hint: <collection_name> [collection_name2] ...
 ---
 
@@ -20,38 +20,44 @@ Explore one or more MongoDB collections to learn their schema, field types, valu
 If `$ARGUMENTS` contains more than one collection name (space- or comma-separated), explore **all of them in parallel**:
 
 1. Read `memory/guide.json` and call `list_collections` once upfront. Store the database name and the full collection list.
-2. For each valid collection, launch a **separate Task subagent** (subagent_type: `general-purpose`) with a prompt that contains the full single-collection exploration instructions (Steps 0–9 below), **plus the database name and the full collection list** (so the subagent skips Step 1 validation and reuses the list for foreign key checks). Run all Task calls in a **single message** so they execute in parallel.
+2. For each valid collection, launch a **separate Task subagent** (subagent_type: `general-purpose`) with a prompt that contains the full single-collection exploration instructions (Steps 0–10 below), **plus the database name and the full collection list** (so the subagent skips Step 1 validation and reuses the list for foreign key checks). Run all Task calls in a **single message** so they execute in parallel.
 3. After all subagents complete, read back the written schema files and present a combined summary to the user.
 
-If only one collection is specified, follow Steps 0–9 directly (no subagent needed).
+If only one collection is specified, follow Steps 0–10 directly (no subagent needed).
 
 ---
 
-## Reference: $facet Guidelines
+## Performance Mode
 
-`$facet` lets you run multiple sub-pipelines in a single aggregation call, reducing round trips. But it has tradeoffs:
+Track aggregation response times during exploration and adapt query behavior accordingly. This protects production clusters from heavy analytical queries.
 
-**How `$facet` works:** Each sub-pipeline runs sequentially against the same input documents. It does NOT parallelize. So 5 heavy sub-pipelines = 5 sequential scans of the same data.
+### Modes
 
-**Use `$facet` when:**
-- The per-facet pipelines are lightweight (single `$group` stage)
-- You're combining related analyses (e.g., all number field ranges in one call)
-- Max 5 facets per call to keep response time reasonable
+| Mode | `$sample` size | Parallel batch size | Restrictions |
+|---|---|---|---|
+| **normal** (default) | 10,000 | 5 | None |
+| **light** | 1,000 | 3 | Skip array element enum detection; skip Step 7 (change frequency) |
+| **minimal** | 500 | 1 (sequential) | Only analyze top-level fields (skip nested dot-notation beyond depth 2) |
 
-**Do NOT use `$facet` when:**
-- A sub-pipeline uses `$unwind`, `$lookup`, or other expensive stages — run these separately
-- You have more than 5 sub-pipelines — split into multiple `$facet` calls
-- The collection has `documentCount > 500,000` AND you're not using `$limit` — always add `$sort` + `$limit` first on large collections
+### Switching Rules
 
-**Prefer separate parallel calls when:**
-- String enum detection — these are heavier (group + sort). Run up to 5 separate string aggregations in parallel per round rather than putting them in `$facet`
-- You're unsure about the cost — separate calls are always safe; `$facet` is an optimization
+- **Start in "normal" mode**
+- **If any MCP aggregation response takes >30 seconds**, switch to **light** mode
+- **If any MCP aggregation response takes >60 seconds**, switch to **minimal** mode
+- Once you switch to a lighter mode, stay there for the rest of the exploration (do not switch back)
+- After completing each batch of aggregation calls, note the current mode: `Performance mode: normal/light/minimal`
+
+### Timing Method
+
+Observe how long each `run_aggregation` call takes to return. You don't need precise millisecond timing — if a response is noticeably slow (long delay before result appears), treat it as exceeding the threshold.
 
 ---
 
 ## Instructions
 
 Follow steps 0–9 in order. Use the MCP tools `list_collections` and `run_aggregation` with the database from `memory/guide.json`. Do NOT skip steps or combine aggregations in ways that could lose detail.
+
+**Bounded aggregations:** ALL Step 6 and Step 7 aggregations MUST prepend `{ "$sample": { "size": 10000 } }` as the first pipeline stage (or the current performance mode's sample size). This avoids full collection scans. The only exception is Step 4, which uses `$sort` + `$limit` to get *recent* docs.
 
 ### Step 0: Check Existing Schema
 
@@ -68,9 +74,23 @@ If it exists:
 
 Call `list_collections` with the database from guide.json. If `$ARGUMENTS` is not in the list, show the available collections and ask the user to pick one. Do not proceed until a valid collection is confirmed.
 
-**Important:** Store the full collection list from this call. You will reuse it in Step 5 for foreign key verification. Do NOT call `list_collections` again.
+**Important:** Store the full collection list from this call. You will reuse it in Step 6 for foreign key verification. Do NOT call `list_collections` again.
 
-### Step 2: Get Document Count
+### Step 2: Fetch Indexes
+
+Call `list_indexes` with the database and collection name. Store the raw index definitions for use in Step 9 (Write Schema File).
+
+- Indexes reveal which fields the application considers important before sampling data
+- Indexed string fields are likely high-cardinality lookup fields, not enums — use this context during field analysis (Step 6)
+- Skip the default `_id` index (it's always present, no signal)
+
+Store each index as:
+- `name` — index name from MongoDB
+- `key` — the key specification (field → direction/type)
+- `unique` — boolean (true if unique index, false otherwise)
+- Other notable properties if present: `sparse`, `ttl` (expireAfterSeconds), `partial` (partialFilterExpression)
+
+### Step 3: Get Document Count
 
 Run:
 ```json
@@ -81,7 +101,7 @@ If the count is 0, write a minimal schema file (metadata only, empty fields) to 
 
 Store the count as `documentCount` for later.
 
-### Step 3: Sample Documents
+### Step 4: Sample Documents
 
 Sample 100 recent documents for field discovery. Use `run_aggregation_to_file` to write results directly to a local file — zero context cost regardless of document size.
 
@@ -93,7 +113,7 @@ The tool writes a **JSON array** to the file and returns only metadata (doc coun
 
 If the tool returns an error, stop and inform the user.
 
-### Step 4: Build Field Inventory (via jq)
+### Step 5: Build Field Inventory (via jq)
 
 Use jq commands on the temp file to discover fields without loading documents into context.
 
@@ -131,37 +151,62 @@ From these results, build the field inventory:
 
 Use dot-notation for nested fields so the final field map is flat: `address.city`, `address.zip`, etc. Cap nesting depth at 5 levels.
 
-### Step 5: Analyze Each Field via Aggregations
+### Step 6: Analyze Each Field via Aggregations
 
-For each discovered field, run targeted aggregations to understand its values. Use the **full collection** (not just the sample) for these aggregations.
+For each discovered field, run targeted aggregations to understand its values. All aggregations operate on a **bounded sample** — prepend `{ "$sample": { "size": <current_mode_sample_size> } }` as the first pipeline stage.
 
-**For collections with `documentCount > 500,000`:** Prepend `{ "$sort": { "_id": -1 } }, { "$limit": 10000 }` to every aggregation pipeline (both `$facet` and separate calls) to analyze the latest 10K documents.
+#### Step 6a — Non-string fields (separate parallel calls, batches of 5)
 
-#### Step 5a — Non-string fields (one or two `$facet` calls)
+For number, date, boolean, and array fields, run **separate parallel `run_aggregation` calls** — up to 5 per batch (or the current performance mode's batch size). Wait for each batch to complete before starting the next.
 
-Combine all number, date, boolean, and array field analyses into `$facet` calls (max 5 facets each):
-
+**Number fields** — one call per field:
 ```json
-[{ "$facet": {
-  "numbers": [{ "$group": { "_id": null, "field1_min": {"$min": "$field1"}, "field1_max": {"$max": "$field1"}, "field1_avg": {"$avg": "$field1"} }}],
-  "dates": [{ "$group": { "_id": null, "field2_min": {"$min": "$field2"}, "field2_max": {"$max": "$field2"} }}],
-  "bool_field1": [{ "$group": { "_id": "$bool_field1", "count": {"$sum": 1} }}],
-  "array_field1": [{ "$group": { "_id": null, "minLen": {"$min": {"$size": "$arr1"}}, "maxLen": {"$max": {"$size": "$arr1"}}, "avgLen": {"$avg": {"$size": "$arr1"}} }}]
-}}]
+[
+  { "$sample": { "size": 10000 } },
+  { "$group": { "_id": null, "min": { "$min": "$field" }, "max": { "$max": "$field" }, "avg": { "$avg": "$field" } } }
+]
 ```
 
-If there are more than 5 facets, split into multiple `$facet` calls.
+**Date fields** — one call per field:
+```json
+[
+  { "$sample": { "size": 10000 } },
+  { "$group": { "_id": null, "min": { "$min": "$field" }, "max": { "$max": "$field" } } }
+]
+```
 
-#### Step 5b — String fields (separate parallel calls, batches of 5)
+**Boolean fields** — one call per field:
+```json
+[
+  { "$sample": { "size": 10000 } },
+  { "$group": { "_id": "$field", "count": { "$sum": 1 } } }
+]
+```
+
+**Array fields** — one call per field:
+```json
+[
+  { "$sample": { "size": 10000 } },
+  { "$group": { "_id": null, "minLen": { "$min": { "$size": "$field" } }, "maxLen": { "$max": { "$size": "$field" } }, "avgLen": { "$avg": { "$size": "$field" } } } }
+]
+```
+
+Group related fields into batches of up to 5 calls fired in parallel. After each batch completes, note: `Performance mode: <current_mode>`.
+
+#### Step 6b — String fields (separate parallel calls, batches of 5)
 
 Run up to 5 string enum aggregations in parallel per round. Wait for each round before starting the next:
 ```json
-[{ "$group": { "_id": "$strField", "count": { "$sum": 1 } } }, { "$sort": { "count": -1 } }]
+[
+  { "$sample": { "size": 10000 } },
+  { "$group": { "_id": "$strField", "count": { "$sum": 1 } } },
+  { "$sort": { "count": -1 } }
+]
 ```
 - If fewer than 30 distinct values → mark `isEnum: true`, store all `enumValues` with counts
 - If 30+ distinct values → mark `isEnum: false`, store 5 example values
 
-**Fire Step 5a and the first batch of Step 5b in the same message** for maximum parallelism.
+**Fire the first batch of Step 6a and the first batch of Step 6b in the same message** for maximum parallelism.
 
 #### Foreign Key Detection
 
@@ -206,19 +251,22 @@ Always use `range` object, never flat `min`/`max`/`avg`.
 ```json
 { "type": "array", "presence": 1.0, "description": "...", "arrayDetails": { "elementType": "string", "minLength": 0, "maxLength": 10, "avgLength": 3.2 } }
 ```
-Determine element type from the sample data. If array elements are strings with <30 distinct values, unwind and count them as enum values too.
+Determine element type from the sample data. If array elements are strings with <30 distinct values, unwind and count them as enum values too (skip this in **light** or **minimal** performance mode).
 
-### Step 6: Change Frequency
+### Step 7: Change Frequency
+
+**Skip this step if in light or minimal performance mode.**
 
 Check for timestamp fields in this order:
 1. `created_at` / `updated_at` (snake_case)
 2. `createdAt` / `updatedAt` (camelCase)
 
-Use whichever pair exists in the field inventory from Step 4. If neither pair exists, set `changeFrequency.hasTimestamps: false` and skip.
+Use whichever pair exists in the field inventory from Step 5. If neither pair exists, set `changeFrequency.hasTimestamps: false` and skip.
 
 If a matching pair is found, run (substituting the actual field names):
 ```json
 [
+  { "$sample": { "size": 10000 } },
   { "$match": { "<updatedField>": { "$exists": true }, "<createdField>": { "$exists": true } } },
   { "$project": { "diff": { "$subtract": ["$<updatedField>", "$<createdField>"] } } },
   { "$group": {
@@ -235,7 +283,7 @@ If a matching pair is found, run (substituting the actual field names):
 
 Format `avgDiff` as human-readable (e.g. `"4d 6h 32m"`) and also store the raw millisecond value.
 
-### Step 7: Ask User for Clarification
+### Step 8: Ask User for Clarification
 
 Present a **summary table** of all discovered fields showing: field name, type, presence %, and whether it's an enum/foreign key.
 
@@ -245,9 +293,9 @@ Then ask the user:
 3. **Deprecated fields** — Are any fields deprecated or no longer in use? (Mention any fields that are always null/empty as likely candidates.)
 4. **Notes** — Any additional context? Common query patterns, business rules, soft-delete conventions, etc.
 
-Wait for the user's response before proceeding to Step 8. If the user says "skip" or "none", proceed with empty aliases/notes.
+Wait for the user's response before proceeding to Step 9. If the user says "skip" or "none", proceed with empty aliases/notes.
 
-### Step 8: Write Schema File
+### Step 9: Write Schema File
 
 Assemble the final schema object and write it to `memory/schema/$ARGUMENTS.json`.
 
@@ -262,12 +310,19 @@ Use this exact structure:
     "exploredAt": "<ISO 8601 timestamp>",
     "sampleSize": 100
   },
+  "indexes": [
+    {
+      "name": "<index_name>",
+      "key": { "<field>": 1 },
+      "unique": false
+    }
+  ],
   "fields": {
     "<fieldName>": {
       "type": "<primary_type>",
       "presence": "<0.0–1.0>",
       "description": "<auto-generated or null>",
-      "...type-specific keys from Step 5"
+      "...type-specific keys from Step 6"
     }
   },
   "aliases": {
@@ -278,7 +333,7 @@ Use this exact structure:
   ],
   "changeFrequency": {
     "hasTimestamps": true,
-    "...metrics from Step 6"
+    "...metrics from Step 7"
   },
   "notes": ["<user-provided notes>"]
 }
@@ -326,7 +381,7 @@ After writing both files, print a confirmation with:
 - Number of foreign keys detected
 - File paths written
 
-### Step 9: Cleanup
+### Step 10: Cleanup
 
 Remove the temp file:
 ```bash
